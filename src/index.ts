@@ -136,7 +136,7 @@ export function apply (ctx: GroupContext) {
 
   command.subcommand('.check', '查看当前直播状态')
     .shortcut('查看单推列表')
-    .shortcut('查看直播状态', { options: { group: true }})
+    .shortcut('查看直播状态', { options: { group: true } })
     .option('-g, --group', '查看本群内全部直播')
     .action(async ({ meta, options }) => {
       const { subscribe } = meta.$group

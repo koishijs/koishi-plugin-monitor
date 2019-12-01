@@ -6,6 +6,8 @@ plugins:
   - '@typescript-eslint'
 
 rules:
+  # only in this repository
+  camelcase: off
   comma-dangle:
     - warn
     - always-multiline

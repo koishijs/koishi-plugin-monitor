@@ -54,7 +54,7 @@ injectMethods('mysql', {
   async findSubscribe (names: string | string[], keys: SubscribeField[] = subscribeKeys) {
     const isSingle = typeof names === 'string'
     if (isSingle) names = [names as string]
-    const data = await this.query('SELECT ' + joinKeys(keys) + ` FROM \`subscribe\` WHERE ` + (names as string[]).map(name => includes('names', name)).join(' OR '))
+    const data = await this.query('SELECT ' + joinKeys(keys) + ' FROM `subscribe` WHERE ' + (names as string[]).map(name => includes('names', name)).join(' OR '))
     return isSingle ? data[0] : data
   },
 
