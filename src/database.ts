@@ -68,7 +68,6 @@ injectMethods('mysql', {
   },
 
   createSubscribe (options) {
-    // TODO: remove any after fixing typings
-    return this.create('subscribe', options) as any
+    return this.create<Subscribe>('subscribe', options)
   },
 })
