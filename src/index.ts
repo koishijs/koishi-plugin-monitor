@@ -1,10 +1,14 @@
-import { onStart, GroupContext } from 'koishi-core'
-import { observe } from 'koishi-utils'
-import { Monitor, CHECK_INTERVAL } from './monitor'
+import { onStart, Context, observe, appList } from 'koishi'
+import { Monitor, INTERVAL } from './monitor'
+import './database'
+
+export * from './database'
+export * from './monitor'
 
 const monitors: Record<number | string, Monitor> = {}
 
-onStart(async ({ database }) => {
+onStart(async () => {
+  const { database } = appList[0]
   const groups = await database.getAllGroups(['subscribe'])
   const idSet = new Set<number>()
   for (const { subscribe } of groups) {
@@ -12,14 +16,19 @@ onStart(async ({ database }) => {
       idSet.add(Number(uid))
     }
   }
+
   const subscribes = await database.getSubscribes(Array.from(idSet))
   subscribes.forEach((subscribe, index) => {
     const monitor = monitors[subscribe.id] = new Monitor(subscribe, database)
-    setTimeout(() => monitor.start(), index * CHECK_INTERVAL / subscribes.length)
+    setTimeout(() => monitor.start(), index * INTERVAL / subscribes.length)
   })
 })
 
-export function apply (ctx: GroupContext) {
+export const name = 'monitor'
+
+export function apply (ctx: Context) {
+  ctx = ctx.intersect(ctx.app.groups)
+
   async function checkNames (names: string[]) {
     const accounts = await ctx.database.findSubscribe(names, ['names'])
     if (!accounts.length) return []
@@ -77,7 +86,7 @@ export function apply (ctx: GroupContext) {
     })
 
   command.subcommand('.remove <name>', '删除已有的检测账号', { authority: 3 })
-    .action(async ({ meta, options }, name) => {
+    .action(async ({ meta }, name) => {
       if (!name) return meta.$send('请输入账号。')
       name = String(name)
       const succeed = await ctx.database.removeSubscribe(name)
@@ -126,7 +135,10 @@ export function apply (ctx: GroupContext) {
       }
       if (nameUpdated) account.names = Array.from(nameSet)
 
-      if (!Object.keys(account._diff).length) return meta.$send('没有信息被修改。')
+      if (!Object.keys(account._diff).length) {
+        return meta.$send('没有信息被修改。')
+      }
+
       if (configUpdated && account.id in monitors) {
         monitors[account.id].start()
       }
@@ -135,8 +147,9 @@ export function apply (ctx: GroupContext) {
     })
 
   command.subcommand('.check', '查看当前直播状态')
+    .groupFields(['subscribe'])
     .shortcut('查看单推列表')
-    .shortcut('查看直播状态', { options: { group: true } })
+    .shortcut('查看直播状态', { options: { group: true }})
     .option('-g, --group', '查看本群内全部直播')
     .action(async ({ meta, options }) => {
       const { subscribe } = meta.$group
@@ -173,17 +186,42 @@ export function apply (ctx: GroupContext) {
 
   command.subcommand('.subscribe <name>', '设置关注账号')
     .shortcut('单推', { prefix: true, fuzzy: true })
+    .shortcut('关注', { prefix: true, fuzzy: true })
+    .shortcut('取消单推', { prefix: true, fuzzy: true, options: { delete: true } })
+    .shortcut('取消关注', { prefix: true, fuzzy: true, options: { delete: true } })
+    .groupFields(['subscribe'])
     .option('-g, --global', '设置本群默认关注', { authority: 2 })
     .option('-d, --delete', '取消关注账号')
+    .option('-D, --delete-all', '取消全部关注账号')
     .action(async ({ meta, options }, name: string) => {
+      const { subscribe } = meta.$group
+      const userId = options.global ? 0 : meta.userId
+      if (options.deleteAll) {
+        let count = 0
+        for (const id in subscribe) {
+          const index = subscribe[id].indexOf(userId)
+          if (index < 0) continue
+          count += 1
+          if (subscribe[id].length === 1) {
+            delete subscribe[id]
+          } else {
+            subscribe[id].splice(index)
+          }
+        }
+        if (count) {
+          await meta.$group._update()
+          return meta.$send(`已成功取消关注 ${count} 个账号。`)
+        } else {
+          return meta.$send('未在本群内关注任何账号。')
+        }
+      }
+
       if (!name) return meta.$send('请输入账号。')
       name = String(name)
       const account = await ctx.database.findSubscribe(name)
       if (!account) return meta.$send('没有找到该账号。')
       const { id } = account
-      const { subscribe } = meta.$group
       if (!subscribe[id]) subscribe[id] = []
-      const userId = options.global ? 0 : meta.userId
       const appellation = options.global ? '本群' : '你'
       const index = subscribe[id].indexOf(userId)
 
@@ -191,9 +229,12 @@ export function apply (ctx: GroupContext) {
         if (index < 0) {
           return meta.$send(appellation + '未关注此账号。')
         }
-        subscribe[id].splice(index)
-        if (!subscribe[id].length) delete subscribe[id]
-        await ctx.database.setGroup(meta.groupId, { subscribe })
+        if (subscribe[id].length === 1) {
+          delete subscribe[id]
+        } else {
+          subscribe[id].splice(index)
+        }
+        await meta.$group._update()
         return meta.$send('已成功取消关注。')
       }
 
@@ -205,7 +246,7 @@ export function apply (ctx: GroupContext) {
         monitors[id] = new Monitor(account, ctx.database)
         monitors[id].start()
       }
-      await ctx.database.setGroup(meta.groupId, { subscribe })
+      await meta.$group._update()
       return meta.$send('关注成功！')
     })
 }

@@ -1,15 +1,20 @@
-import { apps, GroupFlag, Database } from 'koishi-core'
+import { appMap, GroupFlag, Database, CQCode } from 'koishi'
 import { Subscribe } from './database'
-import { CQCode } from 'koishi-utils'
 import bilibili from './bilibili'
 import twitCasting from './twitCasting'
 import mirrativ from './mirrativ'
 import axios from 'axios'
 import debug from 'debug'
 
-export const CHECK_INTERVAL = 60000
+declare module 'koishi-core/dist/context' {
+  interface EventMap {
+    'monitor/send' (info: LiveInfo, groupId: number): void
+  }
+}
 
-const showMonitorLog = debug('app:monitor')
+export const INTERVAL = 60000
+
+const log = debug('app:monitor')
 
 const headers = {
   'Accept-Language': 'en-US,en;q=0.8',
@@ -94,15 +99,15 @@ export class Daemon {
 
   private async run () {
     this.stop()
-    this._timer = setTimeout(() => this.run(), CHECK_INTERVAL)
+    this._timer = setTimeout(() => this.run(), INTERVAL)
     let result: LiveInfo
     try {
       result = await platforms[this.type](this)
       if (result) this.send(result)
       this.isLive = !!result
-      showMonitorLog(this.config.id, this.type, result)
+      log(this.config.id, this.type, result)
     } catch (error) {
-      showMonitorLog(this.config.id, this.type, error)
+      log(this.config.id, this.type, error)
     }
   }
 
@@ -117,16 +122,23 @@ export class Daemon {
     const { url, content, image, title } = info
     const groups = await this.monitor.database.getAllGroups(['id', 'flag', 'assignee', 'subscribe'])
     groups.forEach(async ({ id, flag, assignee, subscribe }) => {
-      if (!subscribe[this.config.id] || flag & GroupFlag.noEmit) return
-      const { sender } = apps[assignee]
-      const output = [`[直播提示] ${this.config.names[0]} 正在 ${this._displayType} 上直播：${url}`]
-      const subscribers = subscribe[this.config.id].filter(x => x)
+      if (!subscribe[this.config.id] || flag & GroupFlag.noEmit) return;
+      const app = appMap[assignee];
+      const output = [`[直播提示] ${this.config.names[0]} 正在 ${this._displayType} 上直播：${url}`];
+      // at subscibers
+      try {
+        const users = await app.sender.getGroupMemberList(id);
+        const subscribers = subscribe[this.config.id].filter(id => !id || users.some(user => user.userId === id));
+        subscribe[this.config.id] = subscribers;
+      } catch {}
+      const subscribers = subscribe[this.config.id].filter(x => x);
       if (subscribers.length) {
-        output.push(subscribers.map(x => `[CQ:at,qq=${x}]`).join(''))
+        output.push(subscribers.map(x => `[CQ:at,qq=${x}]`).join(''));
       }
-      await sender.sendGroupMsg(id, output.join('\n'))
+      app.emit('monitor/send', info, id);
+      await app.sender.sendGroupMsgAsync(id, output.join('\n'));
       if (title || image) {
-        await sender.sendGroupMsg(id, CQCode.stringify('share', { url, image, title, content }))
+        await app.sender.sendGroupMsgAsync(id, CQCode.stringify('share', { url, image, title, content }));
       }
     })
   }

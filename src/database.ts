@@ -1,21 +1,27 @@
-import { joinKeys, arrayTypes, includes, OkPacket } from 'koishi-database-mysql'
+import { arrayTypes, includes, OkPacket } from 'koishi-database-mysql'
 import { injectMethods, extendGroup } from 'koishi-core'
 
 declare module 'koishi-core/dist/database' {
   interface GroupData {
-    subscribe: Record<string, number[]>
+    subscribe: Record<number, number[]>
+  }
+
+  interface TableData {
+    subscribe: Subscribe
+  }
+
+  interface TableMethods {
+    subscribe: SubscribeMethods
   }
 }
 
-declare module 'koishi-core/dist/database' {
-  interface Database {
-    getSubscribes (ids: number[], keys?: SubscribeField[]): Promise<Subscribe[]>
-    findSubscribe (name: string[], keys?: SubscribeField[]): Promise<Subscribe[]>
-    findSubscribe (name: string, keys?: SubscribeField[]): Promise<Subscribe>
-    setSubscribe (id: number, data: Partial<Subscribe>): Promise<any>
-    createSubscribe (options: SubscribeOptions): Promise<Subscribe>
-    removeSubscribe (name: string): Promise<boolean>
-  }
+interface SubscribeMethods {
+  getSubscribes (ids?: number[], keys?: SubscribeField[]): Promise<Subscribe[]>
+  findSubscribe (name: string[], keys?: SubscribeField[]): Promise<Subscribe[]>
+  findSubscribe (name: string, keys?: SubscribeField[]): Promise<Subscribe>
+  setSubscribe (id: number, data: Partial<Subscribe>): Promise<any>
+  createSubscribe (options: SubscribeOptions): Promise<Subscribe>
+  removeSubscribe (name: string): Promise<boolean>
 }
 
 extendGroup(() => ({ subscribe: {} }))
@@ -45,16 +51,17 @@ const subscribeKeys = [
   'twitCasting', 'twitCastingStatus',
 ] as SubscribeField[]
 
-injectMethods('mysql', {
+injectMethods('mysql', 'subscribe', {
   async getSubscribes (ids, keys = subscribeKeys) {
+    if (!ids) return this.query(`SELECT * FROM \`subscribe\``)
     if (!ids.length) return []
-    return this.query('SELECT ' + joinKeys(keys) + ` FROM \`subscribe\` WHERE \`id\` IN (${ids.map(id => `'${id}'`).join(',')})`)
+    return this.query('SELECT ' + this.joinKeys(keys) + ` FROM \`subscribe\` WHERE \`id\` IN (${ids.map(id => `'${id}'`).join(',')})`)
   },
 
   async findSubscribe (names: string | string[], keys: SubscribeField[] = subscribeKeys) {
     const isSingle = typeof names === 'string'
     if (isSingle) names = [names as string]
-    const data = await this.query('SELECT ' + joinKeys(keys) + ' FROM `subscribe` WHERE ' + (names as string[]).map(name => includes('names', name)).join(' OR '))
+    const data = await this.query('SELECT ' + this.joinKeys(keys) + ' FROM `subscribe` WHERE ' + (names as string[]).map(name => includes('names', name)).join(' OR '))
     return isSingle ? data[0] : data
   },
 
@@ -68,6 +75,6 @@ injectMethods('mysql', {
   },
 
   createSubscribe (options) {
-    return this.create<Subscribe>('subscribe', options)
+    return this.create('subscribe', options)
   },
 })
